@@ -10,6 +10,7 @@ import sys
 import argparse
 from ros_data_recorder.main import main as recorder_main
 
+# add
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description='启动带推理功能的ROS数据记录系统')

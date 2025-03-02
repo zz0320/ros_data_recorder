@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                           QProgressBar, QTextEdit, QTabWidget, QFileDialog, QGridLayout,
                           QSpacerItem, QSizePolicy, QCheckBox, QComboBox, QScrollArea,
                           QFrame, QHeaderView, QSplitter, QMessageBox, QListWidget,
-                          QListWidgetItem, QDialog, QRadioButton, QButtonGroup, QLineEdit, QApplication, QGridLayout)
+                          QListWidgetItem, QDialog, QRadioButton, QButtonGroup, QLineEdit, QApplication, QGridLayout, QDoubleSpinBox, QSpinBox)
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, pyqtSlot, QThread
 from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor, QFont
 import shutil
@@ -1566,7 +1566,7 @@ class ROSRecorderGUI(QMainWindow):
         
         # 显示加载中状态
         self.inference_info_label.setText("推理状态: 正在加载模型...")
-        self.status_bar.showMessage("正在加载模型，请稍候...")
+        self.statusbar.showMessage("正在加载模型，请稍候...")
         
         # 禁用加载按钮
         self.load_model_button.setEnabled(False)
@@ -1588,14 +1588,14 @@ class ROSRecorderGUI(QMainWindow):
             # 更新界面状态
             if success:
                 self.inference_info_label.setText("推理状态: 模型加载成功")
-                self.status_bar.showMessage("模型加载成功")
+                self.statusbar.showMessage("模型加载成功")
                 
                 # 启用推理控制按钮
                 self.start_inference_button.setEnabled(True)
                 self.single_step_button.setEnabled(True)
             else:
                 self.inference_info_label.setText("推理状态: 模型加载失败")
-                self.status_bar.showMessage("模型加载失败")
+                self.statusbar.showMessage("模型加载失败")
             
             # 重新启用加载按钮
             self.load_model_button.setEnabled(True)
@@ -1630,7 +1630,7 @@ class ROSRecorderGUI(QMainWindow):
         
         # 更新状态
         self.inference_info_label.setText("推理状态: 正在推理")
-        self.status_bar.showMessage("推理已启动")
+        self.statusbar.showMessage("推理已启动")
         
         # 启动推理线程
         def _inference_thread():
@@ -1639,7 +1639,7 @@ class ROSRecorderGUI(QMainWindow):
             
             # 推理完成后更新状态
             self.inference_info_label.setText("推理状态: 推理已停止")
-            self.status_bar.showMessage("推理已停止")
+            self.statusbar.showMessage("推理已停止")
             
             # 恢复按钮状态
             self.start_inference_button.setEnabled(True)
@@ -1663,7 +1663,7 @@ class ROSRecorderGUI(QMainWindow):
             def _timeout_handler():
                 if self.inference_engine.is_running:
                     self.stop_inference()
-                    self.status_bar.showMessage(f"推理已自动停止(达到{timeout}秒超时时间)")
+                    self.statusbar.showMessage(f"推理已自动停止(达到{timeout}秒超时时间)")
             
             QTimer.singleShot(timeout * 1000, _timeout_handler)
     
