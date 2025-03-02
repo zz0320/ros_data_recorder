@@ -1,0 +1,9 @@
+rospy>=1.15.0
+numpy>=1.18.0
+pandas>=1.0.0
+h5py>=2.10.0
+opencv-python>=4.2.0
+opencv-contrib-python>=4.2.0
+PyQt5>=5.15.0
+tqdm>=4.45.0
+cv_bridge>=1.13.0 

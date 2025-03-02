@@ -1,0 +1,11 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+ROS数据记录器和数据处理器启动脚本
+"""
+
+from ros_data_recorder.main import main
+
+if __name__ == '__main__':
+    main() 

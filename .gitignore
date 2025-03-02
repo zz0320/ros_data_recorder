@@ -1,0 +1,31 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# PyCharm project settings
+.idea/
+
+# VS Code settings
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment directories
+venv/
+env/
+.env/
+
+# Data directories (these might contain large files)
+recorded_data/
+recorded_data_zip/
+
+# System files
+.DS_Store
+Thumbs.db 
