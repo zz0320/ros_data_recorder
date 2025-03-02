@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                           QProgressBar, QTextEdit, QTabWidget, QFileDialog, QGridLayout,
                           QSpacerItem, QSizePolicy, QCheckBox, QComboBox, QScrollArea,
                           QFrame, QHeaderView, QSplitter, QMessageBox, QListWidget,
-                          QListWidgetItem, QDialog, QRadioButton, QButtonGroup, QLineEdit, QApplication, QGridLayout)
+                          QListWidgetItem, QDialog, QRadioButton, QButtonGroup, QLineEdit, QApplication, QGridLayout, QDoubleSpinBox, QSpinBox)
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, pyqtSlot, QThread
 from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor, QFont, QPainter, QImage
 import shutil
@@ -147,12 +147,14 @@ class ROSRecorderGUI(QMainWindow):
         process_tab = QWidget()
         settings_tab = QWidget()
         playback_tab = QWidget()
+        inference_tab = QWidget()
         
         # 添加标签页到标签控件
         self.tabs.addTab(record_tab, "实时监控与录制")
         self.tabs.addTab(manage_tab, "数据管理")
         self.tabs.addTab(process_tab, "数据处理") 
         self.tabs.addTab(playback_tab, "轨迹回放")
+        self.tabs.addTab(inference_tab, "模型推理")
         self.tabs.addTab(settings_tab, "设置")
         
         # 初始化各标签页的布局
@@ -162,8 +164,8 @@ class ROSRecorderGUI(QMainWindow):
         self.setup_settings_tab(settings_tab)
         self.setup_playback_tab(playback_tab)
         
-        # 初始化推理标签页（在该方法内部会添加标签页）
-        self.init_inference_tab()
+        # 初始化推理标签页
+        self.setup_inference_tab(inference_tab)
         
         # 状态栏
         self.statusbar = self.statusBar()
@@ -539,14 +541,10 @@ class ROSRecorderGUI(QMainWindow):
         # 所有UI元素创建完成后再刷新目录列表
         self.refresh_playback_dirs()
     
-    def init_inference_tab(self):
+    def setup_inference_tab(self, inference_tab):
         """初始化推理标签页"""
-        # 创建推理标签页
-        self.inference_tab = QWidget()
-        self.tabs.addTab(self.inference_tab, "模型推理")
-        
         # 创建推理标签页布局
-        inference_layout = QVBoxLayout(self.inference_tab)
+        inference_layout = QVBoxLayout(inference_tab)
         
         # 模型设置区域
         model_group = QGroupBox("模型设置")
@@ -572,7 +570,7 @@ class ROSRecorderGUI(QMainWindow):
         # 检查点路径
         self.ckpt_path_label = QLabel("模型路径:")
         self.ckpt_path_edit = QLineEdit()
-        self.ckpt_path_edit.setPlaceholderText("输入模型检查点路径")
+        self.ckpt_path_edit.setPlaceholderText("输入模型文件夹路径")
         self.ckpt_path_button = QPushButton("浏览...")
         self.ckpt_path_button.clicked.connect(self.browse_ckpt_path)
         model_layout.addWidget(self.ckpt_path_label, 1, 0)
@@ -635,43 +633,23 @@ class ROSRecorderGUI(QMainWindow):
         control_group.setLayout(control_layout)
         inference_layout.addWidget(control_group)
         
-        # 显示区域
-        display_group = QGroupBox("显示")
-        display_layout = QGridLayout()
-        
-        # 图像显示
-        self.inference_images = {}
-        for i, cam_name in enumerate(['front', 'left', 'right']):
-            image_label = QLabel()
-            image_label.setAlignment(Qt.AlignCenter)
-            image_label.setMinimumSize(320, 240)
-            image_label.setMaximumSize(640, 480)
-            image_label.setStyleSheet("border: 1px solid #CCCCCC;")
-            
-            # 标签
-            title_label = QLabel(f"{'前方' if cam_name == 'front' else '左侧' if cam_name == 'left' else '右侧'}相机")
-            title_label.setAlignment(Qt.AlignCenter)
-            
-            # 添加到布局
-            display_layout.addWidget(title_label, 0, i)
-            display_layout.addWidget(image_label, 1, i)
-            
-            # 保存引用
-            self.inference_images[cam_name] = image_label
+        # 状态显示区域
+        status_group = QGroupBox("运行状态")
+        status_layout = QVBoxLayout()
         
         # 状态显示
         self.inference_info_label = QLabel("推理状态: 未初始化")
         self.inference_time_label = QLabel("推理时间: -- ms")
-        display_layout.addWidget(self.inference_info_label, 2, 0, 1, 2)
-        display_layout.addWidget(self.inference_time_label, 2, 2, 1, 1)
+        status_layout.addWidget(self.inference_info_label)
+        status_layout.addWidget(self.inference_time_label)
         
-        # 设置显示组布局
-        display_group.setLayout(display_layout)
-        inference_layout.addWidget(display_group)
+        # 设置状态组布局
+        status_group.setLayout(status_layout)
+        inference_layout.addWidget(status_group)
         
         # 初始状态设置
         if not self.args.enable_inference:
-            self.inference_tab.setEnabled(False)
+            inference_tab.setEnabled(False)
             info_label = QLabel("推理功能未启用，请使用 --enable_inference 启动参数")
             info_label.setAlignment(Qt.AlignCenter)
             inference_layout.addWidget(info_label)
@@ -1521,10 +1499,10 @@ class ROSRecorderGUI(QMainWindow):
     def browse_ckpt_path(self):
         """浏览模型检查点路径"""
         options = QFileDialog.Options()
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, "选择模型检查点", "", "所有文件 (*)", options=options)
-        if filepath:
-            self.ckpt_path_edit.setText(filepath)
+        folder_path = QFileDialog.getExistingDirectory(
+            self, "选择模型文件夹", "", options=options)
+        if folder_path:
+            self.ckpt_path_edit.setText(folder_path)
     
     def load_model(self):
         """加载模型"""
@@ -1535,7 +1513,7 @@ class ROSRecorderGUI(QMainWindow):
         # 获取模型参数
         ckpt_path = self.ckpt_path_edit.text().strip()
         if not ckpt_path:
-            QMessageBox.warning(self, "警告", "请输入模型检查点路径")
+            QMessageBox.warning(self, "警告", "请输入模型文件夹路径")
             return
         
         # 获取策略类型
@@ -1548,7 +1526,7 @@ class ROSRecorderGUI(QMainWindow):
         
         # 显示加载中状态
         self.inference_info_label.setText("推理状态: 正在加载模型...")
-        self.status_bar.showMessage("正在加载模型，请稍候...")
+        self.statusbar.showMessage("正在加载模型，请稍候...")
         
         # 禁用加载按钮
         self.load_model_button.setEnabled(False)
@@ -1570,14 +1548,14 @@ class ROSRecorderGUI(QMainWindow):
             # 更新界面状态
             if success:
                 self.inference_info_label.setText("推理状态: 模型加载成功")
-                self.status_bar.showMessage("模型加载成功")
+                self.statusbar.showMessage("模型加载成功")
                 
                 # 启用推理控制按钮
                 self.start_inference_button.setEnabled(True)
                 self.single_step_button.setEnabled(True)
             else:
                 self.inference_info_label.setText("推理状态: 模型加载失败")
-                self.status_bar.showMessage("模型加载失败")
+                self.statusbar.showMessage("模型加载失败")
             
             # 重新启用加载按钮
             self.load_model_button.setEnabled(True)
@@ -1612,7 +1590,7 @@ class ROSRecorderGUI(QMainWindow):
         
         # 更新状态
         self.inference_info_label.setText("推理状态: 正在推理")
-        self.status_bar.showMessage("推理已启动")
+        self.statusbar.showMessage("推理已启动")
         
         # 启动推理线程
         def _inference_thread():
@@ -1621,7 +1599,7 @@ class ROSRecorderGUI(QMainWindow):
             
             # 推理完成后更新状态
             self.inference_info_label.setText("推理状态: 推理已停止")
-            self.status_bar.showMessage("推理已停止")
+            self.statusbar.showMessage("推理已停止")
             
             # 恢复按钮状态
             self.start_inference_button.setEnabled(True)
@@ -1645,7 +1623,7 @@ class ROSRecorderGUI(QMainWindow):
             def _timeout_handler():
                 if self.inference_engine.is_running:
                     self.stop_inference()
-                    self.status_bar.showMessage(f"推理已自动停止(达到{timeout}秒超时时间)")
+                    self.statusbar.showMessage(f"推理已自动停止(达到{timeout}秒超时时间)")
             
             QTimer.singleShot(timeout * 1000, _timeout_handler)
     
@@ -1703,70 +1681,6 @@ class ROSRecorderGUI(QMainWindow):
         thread.daemon = True
         thread.start()
     
-    def update_inference_display(self):
-        """更新推理显示"""
-        if not self.args.enable_inference or self.inference_engine is None:
-            return
-        
-        # 获取最新的图像数据
-        for cam_name, label in self.inference_images.items():
-            deque = self.inference_engine.img_deques.get(cam_name)
-            
-            if deque is None:
-                self.log_message(f"警告: {cam_name}相机队列不存在")
-                continue
-                
-            if len(deque) == 0:
-                # 如果没有图像数据，显示占位图像
-                if not hasattr(label, 'has_placeholder') or not label.has_placeholder:
-                    placeholder = QPixmap(label.width(), label.height())
-                    placeholder.fill(QColor(200, 200, 200))
-                    painter = QPainter(placeholder)
-                    painter.setPen(QColor(100, 100, 100))
-                    painter.setFont(QFont('Arial', 12))
-                    painter.drawText(placeholder.rect(), Qt.AlignCenter, f"等待{cam_name}相机数据...")
-                    painter.end()
-                    label.setPixmap(placeholder)
-                    label.has_placeholder = True
-                continue
-            
-            try:
-                msg = deque[-1]
-                np_arr = np.frombuffer(msg.data, np.uint8)
-                img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                
-                if img is None:
-                    self.log_message(f"警告: 无法解码{cam_name}相机图像")
-                    continue
-                
-                # 记录接收到图像的日志
-                if not hasattr(self, '_last_image_log') or time.time() - self._last_image_log > 5.0:
-                    self.log_message(f"接收到{cam_name}相机图像: {img.shape}")
-                    self._last_image_log = time.time()
-                
-                # 转换为Qt图像
-                height, width, channel = img.shape
-                bytes_per_line = 3 * width
-                q_img = QImage(img.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                q_img = q_img.rgbSwapped()  # BGR到RGB
-                
-                # 调整图像大小以适配标签
-                pixmap = QPixmap.fromImage(q_img)
-                pixmap = pixmap.scaled(
-                    label.width(), label.height(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                
-                # 显示图像
-                label.setPixmap(pixmap)
-                label.has_placeholder = False
-                
-            except Exception as e:
-                self.log_message(f"更新{cam_name}相机图像显示时出错: {str(e)}", error=True)
-                import traceback
-                traceback.print_exc()
-
     def update_display(self):
         """更新显示"""
         # 更新记录状态
@@ -1776,10 +1690,6 @@ class ROSRecorderGUI(QMainWindow):
             # 更新按钮状态
             self.update_button_states()
             
-            # 更新推理显示
-            if self.args.enable_inference and self.inference_engine is not None:
-                self.update_inference_display()
-                
         except Exception as e:
             self.log_message(f"更新显示时出错: {str(e)}", error=True)
             import traceback

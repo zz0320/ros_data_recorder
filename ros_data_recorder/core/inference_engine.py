@@ -24,18 +24,22 @@ class PolicyFactory:
         """创建策略模型
         
         Args:
-            policy_type: 策略类型，可选值为 'act', 'diffusion', 'pi0'
-            ckpt_path: 检查点路径
-            device: 设备类型，如 'cuda', 'cpu' 等
+            policy_type (str): 策略类型，可选值为 'act', 'diffusion', 'pi0'
+            ckpt_path (str): 模型文件夹路径
+            device (str): 设备类型，例如 'cuda', 'cpu', 'mps'
             
         Returns:
-            策略模型实例
+            Policy: 策略模型实例或None
         """
         try:
             # 确保路径存在
             ckpt_path = os.path.abspath(ckpt_path)
             if not os.path.exists(ckpt_path):
                 raise FileNotFoundError(f"检查点路径不存在: {ckpt_path}")
+            
+            # 确保输入是文件夹
+            if not os.path.isdir(ckpt_path):
+                raise ValueError(f"检查点路径必须是文件夹: {ckpt_path}")
             
             # 根据策略类型导入相应的模型
             if policy_type == 'act':
@@ -204,7 +208,7 @@ class InferenceEngine:
         
         Args:
             policy_type: 策略类型，可选值为 'act', 'diffusion', 'pi0'
-            ckpt_path: 检查点路径，可以是文件夹路径
+            ckpt_path: 检查点路径，应该是文件夹路径
             device: 设备类型，如 'cuda', 'cpu' 等
             
         Returns:
@@ -223,14 +227,17 @@ class InferenceEngine:
             rospy.logerr(f"检查点路径不存在: {ckpt_path}")
             return False
         
-        # 如果是目录路径，则假定模型在pretrained_model子目录下
-        if os.path.isdir(ckpt_path):
-            # 检查是否是以pretrained_model结尾
-            if not ckpt_path.endswith('pretrained_model'):
-                ckpt_path = os.path.join(ckpt_path, 'pretrained_model')
-                if not os.path.exists(ckpt_path):
-                    rospy.logwarn(f"未在指定路径下找到pretrained_model目录，将使用原路径")
-                    ckpt_path = os.path.dirname(ckpt_path)  # 回退到原始路径
+        # 确保输入是文件夹路径
+        if not os.path.isdir(ckpt_path):
+            rospy.logerr(f"检查点路径应该是文件夹: {ckpt_path}")
+            return False
+            
+        # 检查是否是以pretrained_model结尾
+        if not ckpt_path.endswith('pretrained_model'):
+            pretrained_path = os.path.join(ckpt_path, 'pretrained_model')
+            if os.path.exists(pretrained_path):
+                ckpt_path = pretrained_path
+                rospy.loginfo(f"使用子目录 pretrained_model: {ckpt_path}")
         
         self.policy_type = policy_type
         self.ckpt_path = ckpt_path
