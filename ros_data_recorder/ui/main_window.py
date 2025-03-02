@@ -19,6 +19,10 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, pyqtSlot, QThread
 from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor, QFont
 import shutil
+import threading
+import numpy as np
+import cv2
+import torch
 
 # 导入自定义模块
 from ..core.topic_monitor import TopicMonitor
@@ -30,7 +34,6 @@ from ..workers.process_worker import DataProcessWorker
 try:
     from sensor_msgs.msg import Image, JointState, CompressedImage
     from cv_bridge import CvBridge
-    import cv2
     from mocap2robot.msg import vp_control
     from sdk.msg import PuppetState, AlohaCmd
 except ImportError as e:
@@ -71,6 +74,21 @@ class ROSRecorderGUI(QMainWindow):
         
         # 初始化ROS节点
         self.init_ros_node()
+        
+        # 初始化推理引擎
+        if self.args.enable_inference:
+            try:
+                from ..core.inference_engine import InferenceEngine
+                self.inference_engine = InferenceEngine(args=self.args)
+                self.log_message("推理引擎初始化成功")
+            except ImportError as e:
+                self.log_message(f"推理引擎初始化失败: {str(e)}")
+                self.args.enable_inference = False
+        else:
+            self.inference_engine = None
+            
+        # 初始化工作线程
+        self.init_workers()
         
         # 显示就绪
         self.log_message("ROS数据记录器已初始化，等待话题数据...")
@@ -143,6 +161,10 @@ class ROSRecorderGUI(QMainWindow):
         playback_tab = QWidget()
         self.tabs.addTab(playback_tab, "轨迹回放")
 
+        # 推理标签页
+        inference_tab = QWidget()
+        self.tabs.addTab(inference_tab, "模型推理")
+
         # 布置录制标签页
         self.setup_record_tab(record_tab)
         
@@ -157,6 +179,9 @@ class ROSRecorderGUI(QMainWindow):
         
         # 布置回放标签页
         self.setup_playback_tab(playback_tab)
+
+        # 布置推理标签页
+        self.init_inference_tab()
 
         # 状态栏
         self.statusbar = self.statusBar()
@@ -531,6 +556,143 @@ class ROSRecorderGUI(QMainWindow):
         
         # 所有UI元素创建完成后再刷新目录列表
         self.refresh_playback_dirs()
+    
+    def init_inference_tab(self):
+        """初始化推理标签页"""
+        # 创建推理标签页
+        self.inference_tab = QWidget()
+        self.tabs.addTab(self.inference_tab, "模型推理")
+        
+        # 创建推理标签页布局
+        inference_layout = QVBoxLayout(self.inference_tab)
+        
+        # 模型设置区域
+        model_group = QGroupBox("模型设置")
+        model_layout = QGridLayout()
+        
+        # 策略类型选择
+        self.policy_type_label = QLabel("策略类型:")
+        self.policy_type_combo = QComboBox()
+        self.policy_type_combo.addItems(["ACT", "扩散策略", "PI0"])
+        model_layout.addWidget(self.policy_type_label, 0, 0)
+        model_layout.addWidget(self.policy_type_combo, 0, 1)
+        
+        # 设备选择
+        self.device_label = QLabel("推理设备:")
+        self.device_combo = QComboBox()
+        self.device_combo.addItems(["CUDA", "CPU", "MPS"])
+        if not torch.cuda.is_available():
+            # 如果不支持CUDA，设置为CPU
+            self.device_combo.setCurrentIndex(1)
+        model_layout.addWidget(self.device_label, 0, 2)
+        model_layout.addWidget(self.device_combo, 0, 3)
+        
+        # 检查点路径
+        self.ckpt_path_label = QLabel("模型路径:")
+        self.ckpt_path_edit = QLineEdit()
+        self.ckpt_path_edit.setPlaceholderText("输入模型检查点路径")
+        self.ckpt_path_button = QPushButton("浏览...")
+        self.ckpt_path_button.clicked.connect(self.browse_ckpt_path)
+        model_layout.addWidget(self.ckpt_path_label, 1, 0)
+        model_layout.addWidget(self.ckpt_path_edit, 1, 1, 1, 2)
+        model_layout.addWidget(self.ckpt_path_button, 1, 3)
+        
+        # 加载模型按钮
+        self.load_model_button = QPushButton("加载模型")
+        self.load_model_button.clicked.connect(self.load_model)
+        model_layout.addWidget(self.load_model_button, 2, 0, 1, 4)
+        
+        # 设置模型组布局
+        model_group.setLayout(model_layout)
+        inference_layout.addWidget(model_group)
+        
+        # 推理控制区域
+        control_group = QGroupBox("推理控制")
+        control_layout = QGridLayout()
+        
+        # 推理频率设置
+        self.inference_rate_label = QLabel("推理频率(Hz):")
+        self.inference_rate_spin = QDoubleSpinBox()
+        self.inference_rate_spin.setRange(1.0, 200.0)
+        self.inference_rate_spin.setValue(50.0)
+        self.inference_rate_spin.setSingleStep(1.0)
+        control_layout.addWidget(self.inference_rate_label, 0, 0)
+        control_layout.addWidget(self.inference_rate_spin, 0, 1)
+        
+        # 超时设置
+        self.timeout_label = QLabel("超时时间(秒):")
+        self.timeout_spin = QSpinBox()
+        self.timeout_spin.setRange(0, 3600)
+        self.timeout_spin.setValue(0)
+        self.timeout_spin.setSpecialValueText("无限制")
+        control_layout.addWidget(self.timeout_label, 0, 2)
+        control_layout.addWidget(self.timeout_spin, 0, 3)
+        
+        # 同时录制选项
+        self.record_inference_check = QCheckBox("同时录制推理数据")
+        control_layout.addWidget(self.record_inference_check, 1, 0, 1, 2)
+        
+        # 推理控制按钮
+        self.start_inference_button = QPushButton("开始推理")
+        self.start_inference_button.clicked.connect(self.start_inference)
+        self.start_inference_button.setEnabled(False)  # 初始状态下禁用
+        
+        self.stop_inference_button = QPushButton("停止推理")
+        self.stop_inference_button.clicked.connect(self.stop_inference)
+        self.stop_inference_button.setEnabled(False)  # 初始状态下禁用
+        
+        self.single_step_button = QPushButton("单步推理")
+        self.single_step_button.clicked.connect(self.single_step_inference)
+        self.single_step_button.setEnabled(False)  # 初始状态下禁用
+        
+        control_layout.addWidget(self.start_inference_button, 2, 0, 1, 2)
+        control_layout.addWidget(self.stop_inference_button, 2, 2, 1, 1)
+        control_layout.addWidget(self.single_step_button, 2, 3, 1, 1)
+        
+        # 设置控制组布局
+        control_group.setLayout(control_layout)
+        inference_layout.addWidget(control_group)
+        
+        # 显示区域
+        display_group = QGroupBox("显示")
+        display_layout = QGridLayout()
+        
+        # 图像显示
+        self.inference_images = {}
+        for i, cam_name in enumerate(['front', 'left', 'right']):
+            image_label = QLabel()
+            image_label.setAlignment(Qt.AlignCenter)
+            image_label.setMinimumSize(320, 240)
+            image_label.setMaximumSize(640, 480)
+            image_label.setStyleSheet("border: 1px solid #CCCCCC;")
+            
+            # 标签
+            title_label = QLabel(f"{'前方' if cam_name == 'front' else '左侧' if cam_name == 'left' else '右侧'}相机")
+            title_label.setAlignment(Qt.AlignCenter)
+            
+            # 添加到布局
+            display_layout.addWidget(title_label, 0, i)
+            display_layout.addWidget(image_label, 1, i)
+            
+            # 保存引用
+            self.inference_images[cam_name] = image_label
+        
+        # 状态显示
+        self.inference_info_label = QLabel("推理状态: 未初始化")
+        self.inference_time_label = QLabel("推理时间: -- ms")
+        display_layout.addWidget(self.inference_info_label, 2, 0, 1, 2)
+        display_layout.addWidget(self.inference_time_label, 2, 2, 1, 1)
+        
+        # 设置显示组布局
+        display_group.setLayout(display_layout)
+        inference_layout.addWidget(display_group)
+        
+        # 初始状态设置
+        if not self.args.enable_inference:
+            self.inference_tab.setEnabled(False)
+            info_label = QLabel("推理功能未启用，请使用 --enable_inference 启动参数")
+            info_label.setAlignment(Qt.AlignCenter)
+            inference_layout.addWidget(info_label)
     
     def init_ros_node(self):
         """初始化ROS节点和订阅器"""
@@ -1372,4 +1534,242 @@ class ROSRecorderGUI(QMainWindow):
                 return
             
         # 确保所有任务都已完成
-        event.accept() 
+        event.accept()
+
+    def browse_ckpt_path(self):
+        """浏览模型检查点路径"""
+        options = QFileDialog.Options()
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "选择模型检查点", "", "所有文件 (*)", options=options)
+        if filepath:
+            self.ckpt_path_edit.setText(filepath)
+    
+    def load_model(self):
+        """加载模型"""
+        if not self.args.enable_inference or self.inference_engine is None:
+            QMessageBox.warning(self, "警告", "推理引擎未启用")
+            return
+        
+        # 获取模型参数
+        ckpt_path = self.ckpt_path_edit.text().strip()
+        if not ckpt_path:
+            QMessageBox.warning(self, "警告", "请输入模型检查点路径")
+            return
+        
+        # 获取策略类型
+        policy_map = {0: 'act', 1: 'diffusion', 2: 'pi0'}
+        policy_type = policy_map[self.policy_type_combo.currentIndex()]
+        
+        # 获取设备类型
+        device_map = {0: 'cuda', 1: 'cpu', 2: 'mps'}
+        device = device_map[self.device_combo.currentIndex()]
+        
+        # 显示加载中状态
+        self.inference_info_label.setText("推理状态: 正在加载模型...")
+        self.status_bar.showMessage("正在加载模型，请稍候...")
+        
+        # 禁用加载按钮
+        self.load_model_button.setEnabled(False)
+        
+        # 在后台线程中加载模型
+        def _load_model_thread():
+            # 初始化ROS接口
+            if not hasattr(self.inference_engine, 'aloha_cmd_pub') or self.inference_engine.aloha_cmd_pub is None:
+                rate = self.inference_rate_spin.value()
+                self.inference_engine.init_ros(rate)
+            
+            # 加载模型
+            success = self.inference_engine.load_model(
+                policy_type=policy_type,
+                ckpt_path=ckpt_path,
+                device=device
+            )
+            
+            # 更新界面状态
+            if success:
+                self.inference_info_label.setText("推理状态: 模型加载成功")
+                self.status_bar.showMessage("模型加载成功")
+                
+                # 启用推理控制按钮
+                self.start_inference_button.setEnabled(True)
+                self.single_step_button.setEnabled(True)
+            else:
+                self.inference_info_label.setText("推理状态: 模型加载失败")
+                self.status_bar.showMessage("模型加载失败")
+            
+            # 重新启用加载按钮
+            self.load_model_button.setEnabled(True)
+        
+        # 启动加载线程
+        thread = threading.Thread(target=_load_model_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def start_inference(self):
+        """开始推理"""
+        if not self.args.enable_inference or self.inference_engine is None:
+            return
+        
+        if not self.inference_engine.is_initialized:
+            QMessageBox.warning(self, "警告", "请先加载模型")
+            return
+        
+        # 设置推理引擎参数
+        rate = self.inference_rate_spin.value()
+        
+        # 是否同时录制
+        if self.record_inference_check.isChecked():
+            # 启动录制
+            self.start_recording()
+        
+        # 禁用控制按钮
+        self.start_inference_button.setEnabled(False)
+        self.load_model_button.setEnabled(False)
+        self.stop_inference_button.setEnabled(True)
+        self.single_step_button.setEnabled(False)
+        
+        # 更新状态
+        self.inference_info_label.setText("推理状态: 正在推理")
+        self.status_bar.showMessage("推理已启动")
+        
+        # 启动推理线程
+        def _inference_thread():
+            # 启动推理
+            self.inference_engine.run_inference(single_step=False)
+            
+            # 推理完成后更新状态
+            self.inference_info_label.setText("推理状态: 推理已停止")
+            self.status_bar.showMessage("推理已停止")
+            
+            # 恢复按钮状态
+            self.start_inference_button.setEnabled(True)
+            self.load_model_button.setEnabled(True)
+            self.stop_inference_button.setEnabled(False)
+            self.single_step_button.setEnabled(True)
+            
+            # 如果在录制，停止录制
+            if self.record_inference_check.isChecked() and self.is_recording:
+                self.stop_recording()
+        
+        # 启动线程
+        self.inference_thread = threading.Thread(target=_inference_thread)
+        self.inference_thread.daemon = True
+        self.inference_thread.start()
+        
+        # 如果设置了超时
+        timeout = self.timeout_spin.value()
+        if timeout > 0:
+            # 创建超时定时器
+            def _timeout_handler():
+                if self.inference_engine.is_running:
+                    self.stop_inference()
+                    self.status_bar.showMessage(f"推理已自动停止(达到{timeout}秒超时时间)")
+            
+            QTimer.singleShot(timeout * 1000, _timeout_handler)
+    
+    def stop_inference(self):
+        """停止推理"""
+        if not self.args.enable_inference or self.inference_engine is None:
+            return
+        
+        # 停止推理
+        self.inference_engine.stop()
+        
+        # 恢复按钮状态
+        self.start_inference_button.setEnabled(True)
+        self.load_model_button.setEnabled(True)
+        self.stop_inference_button.setEnabled(False)
+        self.single_step_button.setEnabled(True)
+        
+        # 如果在录制，停止录制
+        if self.record_inference_check.isChecked() and self.is_recording:
+            self.stop_recording()
+    
+    def single_step_inference(self):
+        """单步推理"""
+        if not self.args.enable_inference or self.inference_engine is None:
+            return
+        
+        if not self.inference_engine.is_initialized:
+            QMessageBox.warning(self, "警告", "请先加载模型")
+            return
+        
+        # 禁用单步按钮，防止重复点击
+        self.single_step_button.setEnabled(False)
+        
+        # 更新状态
+        self.inference_info_label.setText("推理状态: 执行单步推理")
+        
+        # 执行单步推理
+        def _single_step_thread():
+            start_time = time.time()
+            success = self.inference_engine.run_inference(single_step=True)
+            inference_time = (time.time() - start_time) * 1000  # 转换为毫秒
+            
+            # 更新状态
+            if success:
+                self.inference_info_label.setText("推理状态: 单步推理成功")
+                self.inference_time_label.setText(f"推理时间: {inference_time:.2f} ms")
+            else:
+                self.inference_info_label.setText("推理状态: 单步推理失败")
+            
+            # 恢复按钮状态
+            self.single_step_button.setEnabled(True)
+        
+        # 启动线程
+        thread = threading.Thread(target=_single_step_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def update_inference_display(self):
+        """更新推理显示"""
+        if not self.args.enable_inference or self.inference_engine is None:
+            return
+        
+        # 获取最新的图像数据
+        for cam_name, label in self.inference_images.items():
+            deque = self.inference_engine.img_deques.get(cam_name)
+            if deque and len(deque) > 0:
+                try:
+                    msg = deque[-1]
+                    np_arr = np.frombuffer(msg.data, np.uint8)
+                    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    
+                    # 转换为Qt图像
+                    height, width, channel = img.shape
+                    bytes_per_line = 3 * width
+                    q_img = QImage(img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                    q_img = q_img.rgbSwapped()  # BGR到RGB
+                    
+                    # 调整图像大小以适配标签
+                    pixmap = QPixmap.fromImage(q_img)
+                    pixmap = pixmap.scaled(
+                        label.width(), label.height(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    
+                    # 显示图像
+                    label.setPixmap(pixmap)
+                except Exception as e:
+                    print(f"更新推理图像显示时出错: {str(e)}")
+
+    def update_display(self):
+        """更新显示"""
+        # 调用原有的更新方法
+        # ... existing code ...
+        
+        # 更新推理显示
+        if self.args.enable_inference and self.inference_engine is not None:
+            self.update_inference_display()
+
+    def init_workers(self):
+        """初始化工作线程"""
+        # ... existing code ...
+        pass
+
+    # ... existing code ...
+
+    # ... new methods ...
+
+    # ... existing code ... 

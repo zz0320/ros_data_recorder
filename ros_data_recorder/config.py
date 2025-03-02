@@ -54,4 +54,23 @@ def get_arguments():
                       default='/gripper_action',
                       help='夹爪控制指令话题')
     
+    # 推理配置
+    parser.add_argument('--enable_inference', action='store_true', default=False,
+                      help='是否启用模型推理功能')
+    parser.add_argument('--policy_type', type=str, default='act',
+                      choices=['act', 'diffusion', 'pi0'],
+                      help='推理策略类型, 可选值: act, diffusion, pi0')
+    parser.add_argument('--inference_rate', type=float, default=50.0,
+                      help='推理频率(Hz)')
+    parser.add_argument('--device', type=str, default='cuda',
+                      choices=['cuda', 'cpu', 'mps'],
+                      help='推理设备类型, 可选值: cuda, cpu, mps')
+    parser.add_argument('--ckpt_path', type=str, 
+                      default='',
+                      help='模型检查点路径')
+    parser.add_argument('--record_inference', action='store_true', default=False,
+                      help='是否同时录制推理过程中的数据')
+    parser.add_argument('--inference_timeout', type=int, default=0,
+                      help='推理超时时间(秒)，0表示不限制')
+    
     return parser.parse_args() 
