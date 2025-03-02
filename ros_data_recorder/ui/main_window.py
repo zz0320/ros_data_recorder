@@ -15,9 +15,9 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                           QProgressBar, QTextEdit, QTabWidget, QFileDialog, QGridLayout,
                           QSpacerItem, QSizePolicy, QCheckBox, QComboBox, QScrollArea,
                           QFrame, QHeaderView, QSplitter, QMessageBox, QListWidget,
-                          QListWidgetItem, QDialog, QRadioButton, QButtonGroup, QLineEdit)
+                          QListWidgetItem, QDialog, QRadioButton, QButtonGroup, QLineEdit, QApplication, QGridLayout)
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, pyqtSlot, QThread
-from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor
+from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor, QFont
 import shutil
 
 # 导入自定义模块

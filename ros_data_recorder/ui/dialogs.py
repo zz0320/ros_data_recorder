@@ -15,7 +15,16 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabe
                           QTableWidgetItem, QHeaderView, QSizePolicy, QComboBox, 
                           QCheckBox, QMessageBox, QLineEdit, QFrame)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QColor, QPixmap
+from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor, QFont
+
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                          QPushButton, QLabel, QTableWidget, QTableWidgetItem, QGroupBox, 
+                          QProgressBar, QTextEdit, QTabWidget, QFileDialog, QGridLayout,
+                          QSpacerItem, QSizePolicy, QCheckBox, QComboBox, QScrollArea,
+                          QFrame, QHeaderView, QSplitter, QMessageBox, QListWidget,
+                          QListWidgetItem, QDialog, QRadioButton, QButtonGroup, QLineEdit, QApplication, QGridLayout)
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal, pyqtSlot, QThread
+from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor, QFont
 
 from ..workers.playback_thread import PlaybackThread
 
