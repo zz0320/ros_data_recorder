@@ -129,35 +129,68 @@ class InferenceEngine:
             self.aloha_cmd_pub = rospy.Publisher('/aloha_cmd', AlohaCmd, queue_size=1)
             self.gripper_action_pub = rospy.Publisher('/gripper_action_pub', JointState, queue_size=1)
             
+            # 创建回调函数
+            def image_callback(msg, name):
+                try:
+                    rospy.logdebug(f"接收到{name}相机图像，大小: {len(msg.data)}字节")
+                    self.img_deques[name].append(msg)
+                except Exception as e:
+                    rospy.logerr(f"处理{name}相机图像时出错: {str(e)}")
+            
+            def puppet_state_callback(msg):
+                try:
+                    rospy.logdebug(f"接收到机器人状态，左臂: {len(msg.arm_left.position)}个关节, 右臂: {len(msg.arm_right.position)}个关节")
+                    self.puppet_state_deque.append(msg)
+                except Exception as e:
+                    rospy.logerr(f"处理机器人状态时出错: {str(e)}")
+            
+            def gripper_callback(msg, side):
+                try:
+                    rospy.logdebug(f"接收到{side}夹爪位置: {msg.position}")
+                    if side == "left":
+                        self.gripper_left_deque.append(msg)
+                    else:
+                        self.gripper_right_deque.append(msg)
+                except Exception as e:
+                    rospy.logerr(f"处理{side}夹爪位置时出错: {str(e)}")
+            
             # 订阅话题
+            rospy.loginfo("开始订阅相机话题...")
+            self.image_subscribers = []
             for name, topic in [
                 ('left', '/camera_l/color/image_raw/compressed'),
                 ('right', '/camera_r/color/image_raw/compressed'),
                 ('front', '/camera_f/color/image_raw/compressed')
             ]:
-                rospy.Subscriber(
+                sub = rospy.Subscriber(
                     topic, CompressedImage,
-                    lambda msg, name=name: self.img_deques[name].append(msg),
+                    lambda msg, name=name: image_callback(msg, name),
                     queue_size=1, tcp_nodelay=True
                 )
+                self.image_subscribers.append(sub)
+                rospy.loginfo(f"已订阅{name}相机话题: {topic}")
             
             # 订阅状态话题
-            rospy.Subscriber(
+            rospy.loginfo("开始订阅状态话题...")
+            self.puppet_state_sub = rospy.Subscriber(
                 '/puppet', PuppetState,
-                lambda msg: self.puppet_state_deque.append(msg),
-                queue_size=1
-            )
-            rospy.Subscriber(
-                '/gripper1_position_mm_upsample', JointState,
-                lambda msg: self.gripper_left_deque.append(msg),
-                queue_size=1
-            )
-            rospy.Subscriber(
-                '/gripper2_position_mm_upsample', JointState,
-                lambda msg: self.gripper_right_deque.append(msg),
+                puppet_state_callback,
                 queue_size=1
             )
             
+            self.gripper_left_sub = rospy.Subscriber(
+                '/gripper1_position_mm_upsample', JointState,
+                lambda msg: gripper_callback(msg, "left"),
+                queue_size=1
+            )
+            
+            self.gripper_right_sub = rospy.Subscriber(
+                '/gripper2_position_mm_upsample', JointState,
+                lambda msg: gripper_callback(msg, "right"),
+                queue_size=1
+            )
+            
+            rospy.loginfo("所有ROS话题订阅成功")
             return True
         except ImportError as e:
             rospy.logerr(f"导入ROS消息类型时出错: {str(e)}")
@@ -171,7 +204,7 @@ class InferenceEngine:
         
         Args:
             policy_type: 策略类型，可选值为 'act', 'diffusion', 'pi0'
-            ckpt_path: 检查点路径
+            ckpt_path: 检查点路径，可以是文件夹路径
             device: 设备类型，如 'cuda', 'cpu' 等
             
         Returns:
@@ -183,6 +216,21 @@ class InferenceEngine:
         if ckpt_path is None:
             rospy.logerr("未指定检查点路径")
             return False
+        
+        # 处理路径
+        ckpt_path = os.path.abspath(ckpt_path)
+        if not os.path.exists(ckpt_path):
+            rospy.logerr(f"检查点路径不存在: {ckpt_path}")
+            return False
+        
+        # 如果是目录路径，则假定模型在pretrained_model子目录下
+        if os.path.isdir(ckpt_path):
+            # 检查是否是以pretrained_model结尾
+            if not ckpt_path.endswith('pretrained_model'):
+                ckpt_path = os.path.join(ckpt_path, 'pretrained_model')
+                if not os.path.exists(ckpt_path):
+                    rospy.logwarn(f"未在指定路径下找到pretrained_model目录，将使用原路径")
+                    ckpt_path = os.path.dirname(ckpt_path)  # 回退到原始路径
         
         self.policy_type = policy_type
         self.ckpt_path = ckpt_path

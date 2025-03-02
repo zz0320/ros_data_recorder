@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                           QFrame, QHeaderView, QSplitter, QMessageBox, QListWidget,
                           QListWidgetItem, QDialog, QRadioButton, QButtonGroup, QLineEdit, QApplication, QGridLayout)
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, pyqtSlot, QThread
-from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor, QFont
+from PyQt5.QtGui import QColor, QFont, QPixmap, QIcon, QFontDatabase, QTextCursor, QFont, QPainter, QImage
 import shutil
 import threading
 import numpy as np
@@ -141,48 +141,30 @@ class ROSRecorderGUI(QMainWindow):
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
         
-        # 录制标签页
+        # 创建各个标签页
         record_tab = QWidget()
-        self.tabs.addTab(record_tab, "实时监控与录制")
-        
-        # 管理标签页
         manage_tab = QWidget()
-        self.tabs.addTab(manage_tab, "数据管理")
-        
-        # 数据处理标签页
         process_tab = QWidget()
-        self.tabs.addTab(process_tab, "数据处理")
-        
-        # 设置标签页
         settings_tab = QWidget()
+        playback_tab = QWidget()
+        
+        # 添加标签页到标签控件
+        self.tabs.addTab(record_tab, "实时监控与录制")
+        self.tabs.addTab(manage_tab, "数据管理")
+        self.tabs.addTab(process_tab, "数据处理") 
+        self.tabs.addTab(playback_tab, "轨迹回放")
         self.tabs.addTab(settings_tab, "设置")
         
-        # 回放标签页
-        playback_tab = QWidget()
-        self.tabs.addTab(playback_tab, "轨迹回放")
-
-        # 推理标签页
-        inference_tab = QWidget()
-        self.tabs.addTab(inference_tab, "模型推理")
-
-        # 布置录制标签页
+        # 初始化各标签页的布局
         self.setup_record_tab(record_tab)
-        
-        # 布置管理标签页
         self.setup_manage_tab(manage_tab)
-        
-        # 布置数据处理标签页
         self.setup_process_tab(process_tab)
-        
-        # 布置设置标签页
         self.setup_settings_tab(settings_tab)
-        
-        # 布置回放标签页
         self.setup_playback_tab(playback_tab)
-
-        # 布置推理标签页
+        
+        # 初始化推理标签页（在该方法内部会添加标签页）
         self.init_inference_tab()
-
+        
         # 状态栏
         self.statusbar = self.statusBar()
         self.statusbar.showMessage("就绪")
@@ -1729,39 +1711,79 @@ class ROSRecorderGUI(QMainWindow):
         # 获取最新的图像数据
         for cam_name, label in self.inference_images.items():
             deque = self.inference_engine.img_deques.get(cam_name)
-            if deque and len(deque) > 0:
-                try:
-                    msg = deque[-1]
-                    np_arr = np.frombuffer(msg.data, np.uint8)
-                    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                    
-                    # 转换为Qt图像
-                    height, width, channel = img.shape
-                    bytes_per_line = 3 * width
-                    q_img = QImage(img.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                    q_img = q_img.rgbSwapped()  # BGR到RGB
-                    
-                    # 调整图像大小以适配标签
-                    pixmap = QPixmap.fromImage(q_img)
-                    pixmap = pixmap.scaled(
-                        label.width(), label.height(),
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    
-                    # 显示图像
-                    label.setPixmap(pixmap)
-                except Exception as e:
-                    print(f"更新推理图像显示时出错: {str(e)}")
+            
+            if deque is None:
+                self.log_message(f"警告: {cam_name}相机队列不存在")
+                continue
+                
+            if len(deque) == 0:
+                # 如果没有图像数据，显示占位图像
+                if not hasattr(label, 'has_placeholder') or not label.has_placeholder:
+                    placeholder = QPixmap(label.width(), label.height())
+                    placeholder.fill(QColor(200, 200, 200))
+                    painter = QPainter(placeholder)
+                    painter.setPen(QColor(100, 100, 100))
+                    painter.setFont(QFont('Arial', 12))
+                    painter.drawText(placeholder.rect(), Qt.AlignCenter, f"等待{cam_name}相机数据...")
+                    painter.end()
+                    label.setPixmap(placeholder)
+                    label.has_placeholder = True
+                continue
+            
+            try:
+                msg = deque[-1]
+                np_arr = np.frombuffer(msg.data, np.uint8)
+                img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                
+                if img is None:
+                    self.log_message(f"警告: 无法解码{cam_name}相机图像")
+                    continue
+                
+                # 记录接收到图像的日志
+                if not hasattr(self, '_last_image_log') or time.time() - self._last_image_log > 5.0:
+                    self.log_message(f"接收到{cam_name}相机图像: {img.shape}")
+                    self._last_image_log = time.time()
+                
+                # 转换为Qt图像
+                height, width, channel = img.shape
+                bytes_per_line = 3 * width
+                q_img = QImage(img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                q_img = q_img.rgbSwapped()  # BGR到RGB
+                
+                # 调整图像大小以适配标签
+                pixmap = QPixmap.fromImage(q_img)
+                pixmap = pixmap.scaled(
+                    label.width(), label.height(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                
+                # 显示图像
+                label.setPixmap(pixmap)
+                label.has_placeholder = False
+                
+            except Exception as e:
+                self.log_message(f"更新{cam_name}相机图像显示时出错: {str(e)}", error=True)
+                import traceback
+                traceback.print_exc()
 
     def update_display(self):
         """更新显示"""
-        # 调用原有的更新方法
-        # ... existing code ...
-        
-        # 更新推理显示
-        if self.args.enable_inference and self.inference_engine is not None:
-            self.update_inference_display()
+        # 更新记录状态
+        try:
+            self.update_status()
+            
+            # 更新按钮状态
+            self.update_button_states()
+            
+            # 更新推理显示
+            if self.args.enable_inference and self.inference_engine is not None:
+                self.update_inference_display()
+                
+        except Exception as e:
+            self.log_message(f"更新显示时出错: {str(e)}", error=True)
+            import traceback
+            traceback.print_exc()
 
     def init_workers(self):
         """初始化工作线程"""

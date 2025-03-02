@@ -41,15 +41,36 @@ def main():
     args = parse_args()
     
     # 准备参数列表
-    sys_args = sys.argv.copy()
-    
-    # 将本脚本替换为ros_data_recorder_gui
-    sys_args[0] = 'ros_data_recorder_gui'
+    sys_args = []
+    sys_args.append('ros_data_recorder_gui')
     
     # 添加启用推理的参数
-    if '--enable_inference' not in sys_args:
-        sys_args.append('--enable_inference')
+    sys_args.append('--enable_inference')
     
+    # 添加其他参数
+    if args.save_dir:
+        sys_args.extend(['--save_dir', args.save_dir])
+    
+    if args.policy_type:
+        sys_args.extend(['--policy_type', args.policy_type])
+        
+    if args.inference_rate:
+        sys_args.extend(['--inference_rate', str(args.inference_rate)])
+        
+    if args.device:
+        sys_args.extend(['--device', args.device])
+        
+    if args.ckpt_path:
+        sys_args.extend(['--ckpt_path', args.ckpt_path])
+        
+    if args.record_inference:
+        sys_args.append('--record_inference')
+    
+    # 打印参数
+    print("启动参数:")
+    for arg in sys_args:
+        print(f"  {arg}")
+        
     # 启动记录系统
     sys.argv = sys_args
     recorder_main()
