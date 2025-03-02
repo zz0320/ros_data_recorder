@@ -22,6 +22,11 @@
 ### 安装方法
 
 ```bash
+# docker内安装中文字体
+sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
+sudo apt-get install -y libgl1-mesa-dri libgl1-mesa-glx
+sudo apt-get install -y mesa-utils mesa-common-dev
+
 # 克隆仓库
 git clone https://github.com/your-organization/ros_data_recorder.git
 
